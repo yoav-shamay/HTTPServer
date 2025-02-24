@@ -3,9 +3,9 @@ import os
 class BadRequest(Exception):
     pass
 
-def retrieve_from_input_dictionary(dictionary, key):
+def retrieve_from_input_dictionary(dictionary, key, error_message):
     if key not in dictionary:
-        raise BadRequest() #TODO info message
+        raise BadRequest(error_message)
     return dictionary[key]
 
 def trim_linear_whitespaces(string):
@@ -18,7 +18,7 @@ def trim_linear_whitespaces(string):
 def parse_header(header_line):
     header_splitter = header_line.find(':')
     if header_splitter == -1:
-        raise BadRequest()
+        raise BadRequest("Missing colon in header")
     header_value = trim_linear_whitespaces(header_line[header_splitter + 2:])
     return header_line[:header_splitter], header_value
 
@@ -88,7 +88,7 @@ class ClientConnection:
 
     def recieve_line(self):
         cur_text = ""
-        while cur_text[-2:] != "\r\n":
+        while cur_text[-2:] != "\r\n": #TODO \r\n constant
             cur_text += self.__socket.recv(1).decode()
         return cur_text[:-2]
 
@@ -110,13 +110,13 @@ class ClientConnection:
         body = None
         if "Content-Length" in headers:
             length = int(headers["Content-Length"][0])
-            body = self.__socket.receive(length)
+            body = self.__socket.recv(length)
         return HttpRequest(method, actual_path, query_parameters, headers, body)
 
 
     def send_response(self, response):
         #send first line
-        first_line = f"HTTP/1.1 {response.get_status_code()} {response.get_status_message()}\r\n" #TODO HTTP/1.1 as constant?
+        first_line = f"HTTP/1.1 {response.get_status_code()} {response.get_status_message()}\r\n" #TODO HTTP/1.1 as constant
         self.__socket.send(first_line.encode())
         headers = response.get_headers()
         for header, value in headers.items():
@@ -132,12 +132,12 @@ class ClientConnection:
 class HttpServer: #TODO is this class neccessary?
     def __init__(self):
         self.__server_socket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-        self.__server_socket.bind(("localhost", 80)) #TODO make port a constant? make it a parameter?
+        self.__server_socket.bind(("localhost", 80)) #TODO make port a constant? make it a parameter? also localhost a constnat
         self.__server_socket.listen()
     def accept_client(self):
         client_socket, _ = self.__server_socket.accept()
         return ClientConnection(client_socket)
-    #TODO add proper client handling inside the class?
+    #TODO add proper client handling inside the class? maybe submit request handler as function or something
 
 def get_file_content(file_path):
     file = open(file_path, "rb")
@@ -150,7 +150,7 @@ def write_to_file(file_path, content):
     file.write(content)
     file.close()
 
-def parse_header_value_parameters(header_value_str):
+def parse_header_value_parameters(header_value_str): #TODO seperators as constant?
     value_parts = header_value_str.split(';')
     main_value = trim_linear_whitespaces(value_parts[0])
     parameters = {}
@@ -163,19 +163,19 @@ def parse_header_value_parameters(header_value_str):
     return main_value, parameters
 
 def parse_form_data(request_body, request_headers):
-    content_type_header = retrieve_from_input_dictionary(request_headers, "Content-Type")
+    content_type_header = retrieve_from_input_dictionary(request_headers, "Content-Type", "Missing Content-Type header")
     _, content_type_params = parse_header_value_parameters(content_type_header)
-    boundary = retrieve_from_input_dictionary(content_type_params, "boundary")
+    boundary = retrieve_from_input_dictionary(content_type_params, "boundary", "Missing boundary in Content-Type")
     #remove first and last boundary
-    request_body = request_body.removeprefix(f"{boundary}\r\n").removesuffix(f"\r\n{boundary}\r\n")
+    request_body = request_body.removeprefix(f"{boundary}\r\n".encode()).removesuffix(f"\r\n{boundary}\r\n".encode())
     #seperate headers and body
-    headers_seperator = request_body.find("\r\n\r\n")
+    headers_seperator = request_body.find(b"\r\n\r\n")
     if headers_seperator == -1:
-        raise BadRequest() #TODO message?
+        raise BadRequest("Invalid body structure") #TODO message?
     headers_str = request_body[:headers_seperator]
     content = request_body[headers_seperator + 4:]
     #parse headers
-    headers_splitted = headers_str.split("\r\n")
+    headers_splitted = headers_str.split(b"\r\n")
     headers = {}
     for header_str in headers_splitted:
         header, value = parse_header(header_str)
@@ -187,7 +187,7 @@ CONTENT_TYPE_BY_EXTENSION = {"html":"text/html", "css": "text/css", "js": "appli
                           "gif": "image/gif", "png": "image/png", "ico": "image/x-icon"}
 PLAINTEXT_CONTENT_TYPE = "text/plain"
 ROOT_DIRECTORY = "webroot"
-UPLOADS_PATH = "/imgs"
+UPLOADS_PATH = "/imgs" #TODO change to saved_images? maybe do it differnt than ROOT?
 
 def calculate_next(request):
     parameters = request.get_query_parameters()
@@ -202,8 +202,8 @@ def calculate_next(request):
 
 def calculate_area(request):
     parameters = request.get_query_parameters()
-    height = int(retrieve_from_input_dictionary(parameters, "height"))
-    width = int(retrieve_from_input_dictionary(parameters, "width"))
+    height = int(retrieve_from_input_dictionary(parameters, "height", "Missing height")) #TODO try parse int
+    width = int(retrieve_from_input_dictionary(parameters, "width", "Missing width"))
     area = (height * width) / 2
     response_body = str(area).encode()
     response_headers = {"Content-Type": PLAINTEXT_CONTENT_TYPE} #TODO constants
@@ -213,19 +213,32 @@ def calculate_area(request):
 def upload(request : HttpRequest):
     #upload image from form-data
     form_data_headers, form_data_content = parse_form_data(request.get_body(), request.get_headers())
-    content_disposition_header = retrieve_from_input_dictionary(form_data_headers, "Content-Disposition")
+    content_disposition_header = retrieve_from_input_dictionary(form_data_headers, "Content-Disposition", "Missing Content-Disposition header in request body")
     _, content_disposition_params = parse_header_value_parameters(content_disposition_header)
-    file_name = retrieve_from_input_dictionary(content_disposition_params, "filename")
+    file_name = retrieve_from_input_dictionary(content_disposition_params, "filename", "Missing filename in Content-Disposition header in request body")
     #TODO file name validation
-    file_path = ROOT_DIRECTORY + UPLOADS_PATH + "/" + file_name
+    file_path = ROOT_DIRECTORY + UPLOADS_PATH + "/" + file_name #TODO include / in UPLOADS_PATH?
     write_to_file(file_path, form_data_content)
     return HttpResponse(200, "OK", {}, b"") #TODO add success message?
 
 def get_image(request):
     #parameters: image-name
     #return the uploaded image, 404 if doesnt exist
-    #TODO implement
-    pass
+    image_name = retrieve_from_input_dictionary(request.get_query_parameters(), "image-name", "Missing image-name parameter")
+    image_path = ROOT_DIRECTORY + UPLOADS_PATH + "/" + image_name
+    if os.path.exists(image_path):
+        image_content = read_file(image_path)
+        image_extension_seperator = image_name.rfind(".")
+        if image_extension_seperator != -1:
+            extension = image_name[image_extension_seperator + 1]
+            content_type = CONTENT_TYPE_BY_EXTENSION[extension]
+        else:
+            content_type = PLAINTEXT_CONTENT_TYPE
+        headers = {"Content-Type": content_type}
+        return HttpResponse(200, "OK", headers, image_content)
+    else:
+        print("404") #TODO implement
+        return None
 
 def read_file(request_path):
     file_path = ROOT_DIRECTORY + request_path
@@ -260,9 +273,10 @@ def main():
             else:
                 response = read_file(request_path)
             conn.send_response(response)
-        except BadRequest:
+        except BadRequest as e:
             #TODO support extra bad request info?
             #TODO send bad request
+            print(e)
             pass
         except Exception as e:
             #TODO send internal server error
@@ -286,4 +300,7 @@ TODO Redirect to index.html by default?
 TODO read 4.4 for extra guidelines
 TODO handle url encoding of characters
 TODO percent encoding in form-data
+TODO error messages
+TODO header name cant contain percent encoding but header value can
+TODO parameter value encoding https://datatracker.ietf.org/doc/html/rfc5987
 '''
