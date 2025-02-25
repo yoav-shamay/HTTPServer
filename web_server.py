@@ -33,10 +33,8 @@ def trim_linear_whitespaces(string):
     '''
     return string.strip(" \t")
 
-HEADER_VALUE_SEPERATOR = ':' #TODO needs to be a constant?
-
 def parse_header(header_line):
-    header_splitter = header_line.find(HEADER_VALUE_SEPERATOR)
+    header_splitter = header_line.find(':')
     if header_splitter == -1:
         raise BadRequest("Missing colon in header")
     header_value = trim_linear_whitespaces(header_line[header_splitter + 2:])
@@ -170,16 +168,13 @@ def write_to_file(file_path, content):
     file.write(content)
     file.close()
 
-PARAMETERS_SEPERATOR = ';'
-PARAMETER_NAME_VALUE_SEPEATOR = '='
-
 def parse_header_value_parameters(header_value_str): #TODO handle quoted values
-    value_parts = header_value_str.split(PARAMETERS_SEPERATOR)
+    value_parts = header_value_str.split(':')
     main_value = trim_linear_whitespaces(value_parts[0])
     parameters = {}
     for parameter_str in value_parts[1:]:
         parameter_str = trim_linear_whitespaces(parameter_str)
-        name_value_splitter = parameter_str.find(PARAMETER_NAME_VALUE_SEPEATOR)
+        name_value_splitter = parameter_str.find('=')
         if name_value_splitter == -1:
             raise BadRequest("Invalid header parameter syntax")
         name = parameter_str[:name_value_splitter]
