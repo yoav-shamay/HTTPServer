@@ -5,17 +5,19 @@ import os
 CONTENT_TYPE_BY_EXTENSION = {"html":"text/html", "css": "text/css", "js": "application/javascript", "jpg": "image/jpeg",
                           "gif": "image/gif", "png": "image/png", "ico": "image/x-icon"}
 PLAINTEXT_CONTENT_TYPE = "text/plain"
-CONTENT_TYPE_HEADER_NAME = "Content-Type" #TODO needs to be a constant?
 ROOT_DIRECTORY = "webroot"
 UPLOADS_PATH = "/imgs" #TODO change to saved_images? maybe do it differnt than ROOT?
-#TODO \r\n as constnat?
+#TODO \r\n as constant?
 HTTP_VERSION = "HTTP/1.1"
 
 OK_STATUS_CODE = 200
 BAD_REQUEST_STATUS_CODE = 400
 NOT_FOUND_STATUS_CODE = 404
+REQUEST_TIMEOUT_STATUS_CODE = 408
 INTERNAL_SERVER_ERROR_STATUS_CODE = 500
-#TODO status messages as constants
+#TODO status messages as constants (?)
+
+CONTENT_TYPE_HEADER_NAME = "Content-Type" #TODO needs to be a constant?
 
 class BadRequest(Exception):
     def __init__(self, message):
@@ -150,6 +152,7 @@ class ClientConnection:
 class HttpServer: #TODO is this class neccessary?
     def __init__(self, host, port):
         self.__server_socket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        self.__server_socket.settimeout(1)
         self.__server_socket.bind((host, port))
         self.__server_socket.listen()
     def accept_client(self):
@@ -168,8 +171,8 @@ def write_to_file(file_path, content):
     file.write(content)
     file.close()
 
-def parse_header_value_parameters(header_value_str): #TODO handle quoted values
-    value_parts = header_value_str.split(':')
+def parse_header_value_parameters(header_value_str):
+    value_parts = header_value_str.split(';')
     main_value = trim_linear_whitespaces(value_parts[0])
     parameters = {}
     for parameter_str in value_parts[1:]:
@@ -179,6 +182,21 @@ def parse_header_value_parameters(header_value_str): #TODO handle quoted values
             raise BadRequest("Invalid header parameter syntax")
         name = parameter_str[:name_value_splitter]
         value = parameter_str[name_value_splitter + 1:]
+        if value[0] == "\"": #value is quoted-string
+            value = value.removeprefix("\"").removesuffix("\"") #remove start and end quotes
+            #Handle escaping. the rule is to replace \<char> with <char>.
+            value_after_escaping = ""
+            i = 0
+            while i < len(value):
+                if value[i] == '\\':
+                    if i == (len(value) - 1):
+                        raise BadRequest("Invalid backslash at the end of string")
+                    value_after_escaping += value[i + 1]
+                    i += 2
+                else:
+                    value_after_escaping += value[i]
+                    i += 1
+            value = value_after_escaping
         parameters[name] = value
     return main_value, parameters
 
@@ -187,12 +205,10 @@ def parse_form_data(request_body, request_headers):
     _, content_type_params = parse_header_value_parameters(content_type_header)
     boundary = retrieve_from_input_dictionary(content_type_params, "boundary", "Missing boundary in Content-Type header")
     #remove first and last boundary
-    print(boundary)
     prefix = f"--{boundary}\r\n"
     suffix = f"\r\n--{boundary}--\r\n"
     request_body = request_body.removeprefix(prefix.encode()).removesuffix(suffix.encode())
     #seperate headers and body
-    print(request_body)
     headers_body_seperator = request_body.find(b"\r\n\r\n")
     if headers_body_seperator == -1:
         raise BadRequest("Invalid body structure")
@@ -253,12 +269,13 @@ def get_image(request):
     #parameters: image-name
     #return the uploaded image, 404 if doesnt exist
     image_name = retrieve_from_input_dictionary(request.get_query_parameters(), "image-name", "Missing image-name parameter")
+    #TODO verify image_name? at least protect from directory traversal but might as well use the full verification
     image_path = ROOT_DIRECTORY + UPLOADS_PATH + "/" + image_name
     if os.path.exists(image_path):
-        image_content = read_file(image_path)
+        image_content = get_file_content(image_path)
         image_extension_seperator = image_name.rfind(".")
         if image_extension_seperator != -1:
-            extension = image_name[image_extension_seperator + 1]
+            extension = image_name[image_extension_seperator + 1:]
             content_type = CONTENT_TYPE_BY_EXTENSION[extension]
         else:
             content_type = PLAINTEXT_CONTENT_TYPE
@@ -290,7 +307,7 @@ API_METHODS = {
 def main():
     server = HttpServer("localhost", 80)
     while True:
-        conn = server.accept_client() #Handle multiple requests
+        conn = server.accept_client() #TODO handle multiple requests?
         try:
             request = conn.recieve_request()
             request_path = request.get_request_path()
@@ -299,6 +316,10 @@ def main():
                 response = API_METHODS[(request_method, request_path)](request)
             else:
                 response = read_file(request_path)
+            conn.send_response(response)
+        except socket.timeout: #In case of timeout when recieving the request, send a request timeout error
+            response_headers = {"Connection": "close"} #Signal to close the connection, as mentioned in rfc 7231 6.5.7
+            response = HttpResponse(REQUEST_TIMEOUT_STATUS_CODE, "Request Timeout", response_headers, b"")
             conn.send_response(response)
         except BadRequest as e:
             body = e.message.encode()
@@ -310,6 +331,7 @@ def main():
             headers = {}
             response = HttpResponse(INTERNAL_SERVER_ERROR_STATUS_CODE, "Internal Server Error", headers, b"")
             conn.send_response(response)
+        print("Finished processing request")
         conn.close()
 
 
@@ -319,14 +341,14 @@ if __name__ == "__main__":
 '''
 TODO status codes as contants
 TODO If string concat is quadratic move to list
-TODO Add timeout
+TODO Test timeout and all errors
 TODO Check permission to read from file?
 TODO Prevent directory traversal attack
-TODO I need to handle invalid request format?
 TODO Redirect to index.html by default?
 TODO read 4.4 for extra guidelines
 TODO handle url encoding of characters
 TODO percent encoding in form-data
 TODO header name cant contain percent encoding but header value can
 TODO parameter value encoding https://datatracker.ietf.org/doc/html/rfc5987
+TODO find out why upload doesn't work some of the time randomly
 '''
