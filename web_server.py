@@ -311,7 +311,7 @@ def get_image(request):
 def get_file(request_path):
     file_path = ROOT_DIRECTORY + request_path
     # test if there's a directory traversal attempt
-    root_directory_absolute_path = os.path.abspath(ROOT_DIRECTORY + "/")
+    root_directory_absolute_path = os.path.abspath(ROOT_DIRECTORY)
     request_absolute_path = os.path.abspath(file_path)
      #If the abs path of the request doesn't start with the abs path of the root directory, the request asks for a resource outside of it
     if os.path.commonprefix([root_directory_absolute_path, request_absolute_path]) != root_directory_absolute_path:
@@ -371,7 +371,7 @@ if __name__ == "__main__":
     main()
 
 '''
-TODO all errors testing. tested: timeout, invalid request first line, directory traversal, directory access
+TODO all errors testing. tested: timeout, invalid request first line, directory access
 TODO Redirect to index.html by default?
 TODO read 4.4 for extra guidelines
 TODO handle url encoding of characters
