@@ -224,7 +224,7 @@ class ClientConnection:
             body = self.__socket.recv(length)
         return HttpRequest(method, actual_path, query_parameters, headers, body)
 
-    def send_response(self, response : HttpResponse):
+    def send_response(self, response: HttpResponse):
         """
         This method sends a HTTP response for the client.
         It gets the response as HttpResponse object and sends it according to the protocol.
